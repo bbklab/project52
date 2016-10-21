@@ -1,6 +1,6 @@
  Axel
 ===========
-go port of axel, a light-weight download accelerator.
+go port of `axel`, a light-weight download accelerator.
 
 说明
  ------
