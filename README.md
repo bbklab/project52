@@ -9,3 +9,4 @@ Index
   * [telegram-tg-bot](telegram-tg-bot) an experimental telegram bot
   * [balancer](balancer) generic balancer by `RR` or `Weighted`
   * [emlfile](emlfile) EML file format parser
+  * [ffmpeg](ffmpeg) a tool to convert video files to hls segments for video streaming by `ffmpeg`
