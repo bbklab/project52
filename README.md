@@ -10,3 +10,4 @@ Index
   * [balancer](balancer) generic balancer by `RR` or `Weighted`
   * [emlfile](emlfile) EML file format parser
   * [ffmpeg](ffmpeg) a tool to convert video files to hls segments for video streaming by `ffmpeg`
+  * [goab](goab) go version of `ab`, a light-weight HTTP bench tool
