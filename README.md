@@ -12,3 +12,4 @@ Index
   * [ffmpeg](ffmpeg) a tool to convert video files to hls segments for video streaming by `ffmpeg`
   * [goab](goab) go version of `ab`, a light-weight HTTP bench tool
   * [mesos-stressor](mesos-stressor) a tool to benchmark on Mesos Framework parameters
+  * [ordermap](ordermap) map with `ordered keys` (string key only)
