@@ -1,5 +1,5 @@
 # project52
-52 weeks, 52 Go projects
+52 weeks, 52 Go projects for self-study
 
 Index
 ------
@@ -13,3 +13,4 @@ Index
   * [goab](goab) go version of `ab`, a light-weight HTTP bench tool
   * [mesos-stressor](mesos-stressor) a tool to benchmark on Mesos Framework parameters
   * [ordermap](ordermap) map with `ordered keys` (string key only)
+  * [httpmux](httpmux) a simple HTTP web framework
