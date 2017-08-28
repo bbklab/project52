@@ -14,3 +14,4 @@ Index
   * [mesos-stressor](mesos-stressor) a tool to benchmark on Mesos Framework parameters
   * [ordermap](ordermap) map with `ordered keys` (string key only)
   * [httpmux](httpmux) a simple HTTP web framework
+  * [dfs-find-circle](dfs-find-circle) use `DFS` (depth first search) algorithm to detect graph circle
