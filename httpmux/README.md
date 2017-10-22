@@ -6,6 +6,10 @@ Features
 ------
   * Context
   * Route Registry
-  * Path & Query Parameters
+  * Path Parameters
+  * Query Parameters
+  * Dynamic Pre & Post Midwares
+  * Custom Panic Recovery & Log & NotFound Handler
+  * Share Datas Between Midwares & Handlers Through Context
   * Response Render
-  * Panic Recovery
+  * Debug Switch
