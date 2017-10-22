@@ -1,80 +1,139 @@
-package mux
+package httpmux
 
 import (
 	"fmt"
+	"io/ioutil"
+	"mime"
 	"net/http"
+	"net/http/httputil"
+	stdpath "path"
+	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
+
+	"github.com/bbklab/tracker/pkg/utils"
 )
 
-// HTTPHandler ...
-type HTTPHandler func(*Context)
+// HandleFunc is exported ...
+type HandleFunc func(*Context)
 
 // Mux is a minimal http router implement
 type Mux struct {
-	sync.RWMutex               // protect Routes
-	Routes       []*Route      // all http routes
-	Midwares     []HTTPHandler // global midwares
-	NotFound     HTTPHandler   // not found handler
+	sync.RWMutex              // protect Routes & FileRoutes
+	prefix       string       // prefix for all routes
+	debug        bool         // debug to log each request (and response?)
+	Routes       []*Route     // all http routes
+	FileRoutes   []*FileRoute // all httpdir file routes
+	PreMidwares  []HandleFunc // pre global midwares
+	PostMidwares []HandleFunc // post global midwares triggered afterwards
+	NotFound     HandleFunc   // not found handler
+	CatchPanic   HandleFunc   // panic handler
+	AuditLog     HandleFunc   // audit handler
 }
 
 // New create an instance of Mux
-func New() *Mux {
+func New(prefix string) *Mux {
 	return &Mux{
-		Routes:   make([]*Route, 0),
-		Midwares: make([]HTTPHandler, 0),
-		NotFound: func(ctx *Context) { // default not found handler
-			ctx.Error(404, "no such route")
-		},
+		prefix:       prefix,
+		debug:        false,
+		Routes:       make([]*Route, 0),
+		PreMidwares:  make([]HandleFunc, 0),
+		PostMidwares: make([]HandleFunc, 0),
+		NotFound:     defaultNotFound,
+		CatchPanic:   defaultCatchPanic,
+		AuditLog:     defaultLog,
 	}
 }
 
 // ServeHTTP implement http.Handler
 func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// panic protection
-	defer func() {
-		if r := recover(); r != nil {
-			var msg string
-			switch v := r.(type) {
-			case error:
-				msg = v.Error()
-			default:
-				msg = fmt.Sprintf("%v", v)
+	var (
+		method = r.Method
+		path   = r.URL.Path
+	)
+
+	// reset w as our http.ResponseWriter implemention thus
+	// we could caught the response code & response body size
+	// unless the http handler Hijack-ed the in-comming connection
+	w = NewResponse(w)
+
+	// new http request scope context
+	// note: reuse this contex for every handlers & midwares
+	var (
+		ctx = newContext(r, w, m)
+	)
+
+	if m.debug {
+		reqbs, _ := httputil.DumpRequest(r, true)
+		log.Println(string(reqbs))
+	}
+
+	// global midwares: panic recovery
+	defer m.CatchPanic(ctx)
+
+	// global midware: log
+	defer m.AuditLog(ctx)
+
+	// pre midware handlers
+	if mws := m.PreMidwares; len(mws) > 0 {
+		for _, mw := range mws {
+			mw(ctx)
+			if ctx.isAbort() { // if ctx marked as abort, quit immediately
+				return
 			}
-
-			stack := make([]byte, 4096)
-			runtime.Stack(stack, true)
-			msg = fmt.Sprintf("PANIC RECOVER: %s\n\n%s\n", msg, string(stack))
-
-			log.Errorln(msg)
-			http.Error(w, msg, 500)
 		}
-	}()
-
-	// global midwares: log, auth ...
-
-	// log midware
-	method, remote, path := r.Method, r.RemoteAddr, r.URL.Path
-	log.Println(method, remote, path)
+	}
 
 	// route the request to the right way
-	route, params := m.bestMatch(method, path)
-	if route != nil {
-		ctx := newContext(r, w, params, m)
-		for _, h := range route.handlers {
-			h(ctx) // protect panic
+
+	// hit httpdir file route, seving static files
+	// TODO replaced this by http.FileServer
+	bs, ctype, matched, err := m.bestMatchFile(path)
+	if matched {
+		if err != nil {
+			ctx.AutoError(err)
+			return
 		}
+
+		if ctype != "" {
+			ctx.Res.Header().Set("Content-Type", ctype)
+		}
+		ctx.Res.WriteHeader(200)
+		ctx.Res.Write(bs)
 		return
 	}
 
+	// hit general http route, serving by matched handlers
+	route, params := m.bestMatch(method, path)
+
 	// not found
-	ctx := newContext(r, w, nil, m)
-	m.NotFound(ctx)
+	if route == nil {
+		m.NotFound(ctx)
+		return
+	}
+
+	// found
+	ctx.withPathParams(params) // set contex path parameters
+	for _, h := range route.handlers {
+		h(ctx)             // protect panic
+		if ctx.isAbort() { //  if ctx marked as abort, quit immediately
+			return
+		}
+	}
+
+	// post midware handlers
+	if mws := m.PostMidwares; len(mws) > 0 {
+		for _, mw := range mws {
+			mw(ctx)
+			if ctx.isAbort() { // if ctx marked as abort, quit immediately
+				return
+			}
+		}
+	}
 }
 
 // AllRoutes ...
@@ -84,78 +143,161 @@ func (m *Mux) AllRoutes() []*Route {
 	return m.Routes[:]
 }
 
+// AllFileRoutes is exported
+func (m *Mux) AllFileRoutes() []*FileRoute {
+	m.RLock()
+	defer m.RUnlock()
+	return m.FileRoutes[:]
+}
+
 // AddRoute ...
-func (m *Mux) AddRoute(method, pattern string, handlers []HTTPHandler) {
-	route := newRoute(method, pattern, handlers)
+func (m *Mux) AddRoute(method, pattern string, handlers []HandleFunc) {
+	route := newRoute(method, m.prefix+pattern, handlers)
 	m.Lock()
 	m.Routes = append(m.Routes, route)
 	m.Unlock()
 }
 
-// SetNotFound ...
-func (m *Mux) SetNotFound(h HTTPHandler) {
-	m.NotFound = h
-}
-
-// SetMidware ...
-func (m *Mux) SetMidware(hs ...HTTPHandler) {
+// AddFileRoute ...
+func (m *Mux) AddFileRoute(uri, httpdir string) {
+	fullpath := strings.TrimSuffix(m.prefix+uri, "/")
 	m.Lock()
-	m.Midwares = append(m.Midwares, hs...)
+	m.FileRoutes = append(m.FileRoutes, &FileRoute{fullpath, httpdir})
 	m.Unlock()
 }
 
-// Get ...
-func (m *Mux) Get(pattern string, hs ...HTTPHandler) {
+// SetNotFound ...
+func (m *Mux) SetNotFound(h HandleFunc) {
+	m.NotFound = h
+}
+
+// SetCatchPanic ...
+func (m *Mux) SetCatchPanic(h HandleFunc) {
+	m.CatchPanic = h
+}
+
+// SetAuditLog ...
+func (m *Mux) SetAuditLog(h HandleFunc) {
+	m.AuditLog = h
+}
+
+// SetDebug is exported
+func (m *Mux) SetDebug(flag bool) {
+	m.debug = flag
+}
+
+// SetGlobalPreMidware ...
+func (m *Mux) SetGlobalPreMidware(h HandleFunc) {
+	m.Lock()
+	defer m.Unlock()
+	for _, mw := range m.PreMidwares {
+		if utils.FuncName(mw) == utils.FuncName(h) {
+			return
+		}
+	}
+	m.PreMidwares = append(m.PreMidwares, h)
+}
+
+// DelGlobalPreMidware ...
+func (m *Mux) DelGlobalPreMidware(h HandleFunc) {
+	m.Lock()
+	defer m.Unlock()
+	for idx, mw := range m.PreMidwares {
+		if utils.FuncName(mw) == utils.FuncName(h) {
+			m.PreMidwares = append(m.PreMidwares[:idx], m.PreMidwares[idx+1:]...)
+			return
+		}
+	}
+}
+
+// SetGlobalPostMidware ...
+func (m *Mux) SetGlobalPostMidware(h HandleFunc) {
+	m.Lock()
+	defer m.Unlock()
+	for _, mw := range m.PostMidwares {
+		if utils.FuncName(mw) == utils.FuncName(h) {
+			return
+		}
+	}
+	m.PostMidwares = append(m.PostMidwares, h)
+}
+
+// DelGlobalPostMidware ...
+func (m *Mux) DelGlobalPostMidware(h HandleFunc) {
+	m.Lock()
+	defer m.Unlock()
+	for idx, mw := range m.PostMidwares {
+		if utils.FuncName(mw) == utils.FuncName(h) {
+			m.PostMidwares = append(m.PostMidwares[:idx], m.PostMidwares[idx+1:]...)
+			return
+		}
+	}
+}
+
+// GET is exported ...
+func (m *Mux) GET(pattern string, hs ...HandleFunc) {
 	m.AddRoute("GET", pattern, hs)
 }
 
-// Post ...
-func (m *Mux) Post(pattern string, hs ...HTTPHandler) {
+// POST is exported ...
+func (m *Mux) POST(pattern string, hs ...HandleFunc) {
 	m.AddRoute("POST", pattern, hs)
 }
 
-// Patch ...
-func (m *Mux) Patch(pattern string, hs ...HTTPHandler) {
+// PATCH is exported ...
+func (m *Mux) PATCH(pattern string, hs ...HandleFunc) {
 	m.AddRoute("PATCH", pattern, hs)
 }
 
-// Put ...
-func (m *Mux) Put(pattern string, hs ...HTTPHandler) {
+// PUT is exported ...
+func (m *Mux) PUT(pattern string, hs ...HandleFunc) {
 	m.AddRoute("PUT", pattern, hs)
 }
 
-// Delete ...
-func (m *Mux) Delete(pattern string, hs ...HTTPHandler) {
+// DELETE is exported ...
+func (m *Mux) DELETE(pattern string, hs ...HandleFunc) {
 	m.AddRoute("DELETE", pattern, hs)
 }
 
-// Head ...
-func (m *Mux) Head(pattern string, hs ...HTTPHandler) {
+// HEAD is exported ...
+func (m *Mux) HEAD(pattern string, hs ...HandleFunc) {
 	m.AddRoute("HEAD", pattern, hs)
 }
 
-// Options ...
-func (m *Mux) Options(pattern string, hs ...HTTPHandler) {
+// OPTIONS is exported ...
+func (m *Mux) OPTIONS(pattern string, hs ...HandleFunc) {
 	m.AddRoute("OPTIONS", pattern, hs)
 }
 
-// Any ...
-func (m *Mux) Any(pattern string, hs ...HTTPHandler) {
+// ANY is exported ...
+func (m *Mux) ANY(pattern string, hs ...HandleFunc) {
 	m.AddRoute("*", pattern, hs)
+}
+
+// FILE is exported ...
+func (m *Mux) FILE(uri, httpdir string) {
+	m.AddFileRoute(uri, httpdir)
 }
 
 // bestMatch try to find the best matched route and it's path params kv
 /*
-eg:
+eg1:
   request: GET /user/all
   will match routes like:
 	/user/all   - this is what we expect
 	/user/:id
+
+eg2:
+  request: GET /user/bbk/repoxxx
+  will match routes like:
+    /user/:name/repoxxx   - this is what we expect
+    /user/:name/repo
 */
 func (m *Mux) bestMatch(method, path string) (*Route, Params) {
-	matched := make([]*Route, 0, 0)
+	path = strings.TrimSuffix(path, "/")
 
 	// itera all routes to find all of matched routes
+	matched := make([]*Route, 0, 0)
 	for _, route := range m.AllRoutes() {
 		if _, ok := route.match(method, path); !ok {
 			continue
@@ -174,18 +316,43 @@ func (m *Mux) bestMatch(method, path string) (*Route, Params) {
 	return best, params
 }
 
+func (m *Mux) bestMatchFile(path string) ([]byte, string, bool, error) {
+	path = strings.TrimSuffix(path, "/")
+
+	// itera all file routes to find the first matched httpdir route
+	for _, route := range m.AllFileRoutes() {
+		if strings.HasPrefix(path, route.FullPath) {
+			relative := strings.TrimPrefix(path, route.FullPath)
+			localpath := stdpath.Join(route.HTTPDir, relative)
+			ctype := mime.TypeByExtension(filepath.Ext(localpath)) // See More: net/http.serveContent()
+			bs, err := ioutil.ReadFile(localpath)
+			return bs, ctype, true, err
+		}
+	}
+
+	return nil, "", false, nil
+}
+
+// FileRoute represents single user defined httpdir files route to serving static files
+type FileRoute struct {
+	FullPath string // request full path (with prefix)
+	HTTPDir  string // local http dir path
+}
+
 // Route represents single user defined http route
 type Route struct {
 	Method  string
 	Pattern string
 
-	handlers  []HTTPHandler
+	handlers  []HandleFunc
 	reg       *regexp.Regexp // generated from Pattern, for matching to capture path params
 	paramKeys []string       // captured path param key names
 	numField  int            // nb of splited fields
+	lastField string         // last field
+	wildchars bool           // contains wildchars or not
 }
 
-func newRoute(method, pattern string, handlers []HTTPHandler) *Route {
+func newRoute(method, pattern string, handlers []HandleFunc) *Route {
 	pattern = strings.TrimSuffix(pattern, "/")
 	r := &Route{
 		Method:   method,
@@ -198,19 +365,27 @@ func newRoute(method, pattern string, handlers []HTTPHandler) *Route {
 
 func (r *Route) init(pattern string) {
 	var (
-		reg    = regexp.MustCompile(`/:([a-zA-Z0-9_]+)`)
+		reg    = regexp.MustCompile(`/:([a-zA-Z0-9._@-]+)`)
 		keys   = make([]string, 0, 0)
 		fields = strings.Split(strings.TrimPrefix(pattern, "/"), "/")
 	)
 
 	newRegStr := reg.ReplaceAllStringFunc(pattern, func(s string) string {
 		keys = append(keys, s[2:]) // trim heading 2 chars /:
-		return fmt.Sprintf("/(?P<%s>[a-zA-Z0-9_]+)", s[2:])
+		return fmt.Sprintf("/(?P<%s>[a-zA-Z0-9._@-]+)", s[2:])
 	})
+
+	if strings.Contains(newRegStr, "***") {
+		r.wildchars = true
+		newRegStr = strings.Replace(newRegStr, "***", ".*", -1)
+	}
 
 	r.reg = regexp.MustCompile(newRegStr)
 	r.paramKeys = keys
 	r.numField = len(fields)
+	if r.numField > 0 {
+		r.lastField = fields[r.numField-1]
+	}
 }
 
 // match check http request against it's method & url path
@@ -224,7 +399,6 @@ func (r *Route) match(method, path string) (params Params, matched bool) {
 	}
 
 	// match the url path
-	path = strings.TrimSuffix(path, "/")
 	var (
 		matchedStrs  = make([]string, 0)
 		matchedNames = make([]string, 0)
@@ -232,17 +406,34 @@ func (r *Route) match(method, path string) (params Params, matched bool) {
 
 	// match fields nb
 	fields := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(fields) != r.numField {
-		return nil, false
+	if !r.wildchars { // if not contains wildchars, the nb of fields must be equal, otherwise not hit
+		if len(fields) != r.numField {
+			return nil, false
+		}
+	} else { // if contains wildchars, the nb of fields must >= pattern, otherwise not hit
+		if len(fields) < r.numField {
+			return nil, false
+		}
 	}
 
-	// exact match
+	// try exact match the whole path
 	if !strings.Contains(r.Pattern, "/:") {
 		matched = path == r.Pattern
 		return
 	}
 
-	// regexp match
+	// exact check on the last field if last field not path parameter and not wildchars
+	if len(fields) > 0 {
+		lastField := fields[len(fields)-1]
+		if !strings.HasPrefix(r.lastField, ":") && !strings.Contains(r.lastField, "***") {
+			// lastField not path parameter and not wildchars
+			if lastField != r.lastField {
+				return
+			}
+		}
+	}
+
+	// try regexp match the whole path
 	if r.reg == nil {
 		return
 	}
