@@ -15,3 +15,4 @@ Index
   * [ordermap](ordermap) map with `ordered keys` (string key only)
   * [httpmux](httpmux) a simple HTTP web framework
   * [dfs-find-circle](dfs-find-circle) use `DFS` (depth first search) algorithm to detect graph circle
+  * [mole](mole) a reverse HTTP-Compatible RPC framework
