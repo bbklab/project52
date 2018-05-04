@@ -17,3 +17,4 @@ Index
   * [dfs-find-circle](dfs-find-circle) use `DFS` (depth first search) algorithm to detect graph circle
   * [mole](mole) a reverse HTTP-Compatible RPC framework
   * [netlink](netlink) dump linux kernel network statistics through `netlink` protocol
+  * [qrcode](qrcode) a stable tool for qrcode generator & parser with zero dependencies
