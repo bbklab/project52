@@ -18,3 +18,4 @@ Index
   * [mole](mole) a reverse HTTP-Compatible RPC framework
   * [netlink](netlink) dump linux kernel network statistics through `netlink` protocol
   * [qrcode](qrcode) a stable tool for qrcode generator & parser with zero dependencies
+  * [rate-limit](rate-limit) a generic event rate limiter by pure go
