@@ -13,9 +13,9 @@ Index
   * [goab](goab) go version of `ab`, a light-weight HTTP bench tool
   * [mesos-stressor](mesos-stressor) a tool to benchmark on Mesos Framework parameters
   * [ordermap](ordermap) map with `ordered keys` (string key only)
-  * [httpmux](httpmux) a simple HTTP web framework
+  * [<span style="color:red;">httpmux</span>](httpmux) a simple HTTP web framework
   * [dfs-find-circle](dfs-find-circle) use `DFS` (depth first search) algorithm to detect graph circle
-  * [mole](mole) a reverse HTTP-Compatible RPC framework
+  * [<span style="color:red;">mole</span>](mole) a reverse HTTP-Compatible RPC framework
   * [netlink](netlink) dump linux kernel network statistics through `netlink` protocol
   * [qrcode](qrcode) a stable tool for qrcode generator & parser with zero dependencies
-  * [rate-limit](rate-limit) a generic event rate limiter by pure go
+  * [<span style="color:red;">rate-limit</span>](rate-limit) a generic event rate limiter by pure go
