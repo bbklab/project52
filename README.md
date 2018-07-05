@@ -19,3 +19,4 @@ Index
   * [netlink](netlink) dump linux kernel network statistics through `netlink` protocol
   * [qrcode](qrcode) a stable tool for qrcode generator & parser with zero dependencies
   * [<span style="color:red;">rate-limit</span>](rate-limit) a generic event rate limiter by pure go
+  * [geoip](geoip) lookup asn, country, city for IP address by using GeoIP2 database
