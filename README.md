@@ -1,5 +1,5 @@
 # project52
-52 weeks, 52 Go projects for self-study
+52 small Go projects challenge but in more than 52 weeks for self-study ;-)
 
 Index
 ------
@@ -13,12 +13,12 @@ Index
   * [goab](goab) go version of `ab`, a light-weight HTTP bench tool
   * [mesos-stressor](mesos-stressor) a tool to benchmark on Mesos Framework parameters
   * [ordermap](ordermap) map with `ordered keys` (string key only)
-  * [<span style="color:red;">httpmux</span>](httpmux) a simple HTTP web framework
+  * [httpmux](httpmux) a simple HTTP web framework
   * [dfs-find-circle](dfs-find-circle) use `DFS` (depth first search) algorithm to detect graph circle
-  * [<span style="color:red;">mole</span>](mole) a reverse HTTP-Compatible RPC framework
+  * [mole](mole) a reverse HTTP-Compatible RPC framework
   * [netlink](netlink) dump linux kernel network statistics through `netlink` protocol
   * [qrcode](qrcode) a stable tool for qrcode generator & parser with zero dependencies
-  * [<span style="color:red;">rate-limit</span>](rate-limit) a generic event rate limiter by pure go
+  * [rate-limit](rate-limit) a generic event rate limiter by pure go
   * [geoip](geoip) lookup asn, country, city for IP address by using GeoIP2 database
   * [cloudnode](cloudnode) a common interface to access various cloud & vps nodes
   * [naivecrypto](naivecrypto) a small naive private crypto tool
